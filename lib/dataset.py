@@ -35,7 +35,7 @@ class PDEDataset(Dataset):
         return self.length
 
     def __getitem__(self, index):
-        return self.data[index, :-1], self.original_data[index, -1]
+        return self.data[index, :-1], self.original_data[index]
 
 
 class PDEDatasetAll2All(Dataset):

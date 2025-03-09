@@ -36,21 +36,19 @@ gamma = 0.75
 
 
 model = LinOSSModel(
-    input_dim=64,
-    output_dim=64,
-    hidden_dim=128,
+    input_dim=2,
+    output_dim=1,
+    hidden_dim=32,
     num_layers=3,
 ).to(DEVICE)
 
 
 optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=1e-5)
 # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
-# scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-#     optimizer, "min", patience=step_size
-# )
-scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-    optimizer, T_0=step_size, eta_min=1e-6
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    optimizer, "min", patience=step_size
 )
+# scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0 = step_size, eta_min=1e-6)
 
 
 model.train()
@@ -66,11 +64,11 @@ for epoch in progress_bar:
     train_loss = 0.0
     for input, target in train_data_loader:
         optimizer.zero_grad()
-
-        input = input[..., 0]
         prediction = model(input).squeeze(-1)
 
-        loss = relative_l2_error(prediction, target[..., 1:, :], dim=None)
+        prediction = prediction[:, -1].squeeze(1)[..., 0]
+
+        loss = relative_l2_error(prediction, target, dim=None)
         loss.backward()
         optimizer.step()
 
@@ -81,12 +79,11 @@ for epoch in progress_bar:
     # Compute validation loss
     validation_relative_l2 = 0.0
     for input, target in val_data_loader:
-        input = input[..., 0]
-
         with torch.no_grad():
             prediction = model(input).squeeze(-1)
+            prediction = prediction[:, -1].squeeze(1)[..., 0]
 
-        loss = torch.sum(relative_l2_error(prediction, target[..., 1:, :]))
+        loss = torch.sum(relative_l2_error(prediction, target))
         validation_relative_l2 += loss.item()
 
     validation_relative_l2 /= len(val_data)
