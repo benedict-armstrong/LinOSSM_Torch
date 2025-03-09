@@ -1,45 +1,77 @@
+from typing import Literal
 import torch
 import numpy as np
 from torch.utils.data import DataLoader
+from torch.utils.data import Dataset
 import tqdm
 from torch.optim import Adam
 import matplotlib.pyplot as plt
+import pickle
 from lib.layers import LinOSSModel
-from lib.dataset import PDEDataset
-from lib.utils import relative_l2_error
 
 
 torch.manual_seed(0)
 np.random.seed(0)
 
 
-N_TRAIN = 64  # number of training samples
 BATCH_SIZE = 64
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = "cuda" if torch.cuda.is_available() else "mps"
 
 
-training_data = PDEDataset("data/train_sol.npy", device=DEVICE)
+class WormsDataset(Dataset):
+    def __init__(
+        self,
+        mode: Literal["train", "test"],
+        device: str = "cpu",
+    ):
+        self.device = device
+        self.mode = mode
+        self.data = np.array(pickle.load(open("data/EigenWorms/data.pkl", "rb")))
+        self.labels = np.array(pickle.load(open("data/EigenWorms/labels.pkl", "rb")))
+
+        self.train_idx, self.test_idx = pickle.load(
+            open("data/EigenWorms/original_idxs.pkl", "rb")
+        )
+
+        self.train_idx = np.array(self.train_idx)
+        self.test_idx = np.array(self.test_idx)
+
+    def __len__(self):
+        return self.mode == "train" and len(self.train_idx) or len(self.test_idx)
+
+    def __getitem__(self, index):
+        if self.mode == "train":
+            idx = self.train_idx[index]
+        else:
+            idx = self.test_idx[index]
+
+        data = self.data[idx]
+        label = self.labels[idx]
+
+        data = torch.tensor(data, dtype=torch.float32, device=self.device)
+        label = torch.tensor(label, dtype=torch.float32, device=self.device)
+
+        return data, label
+
+
+training_data = WormsDataset("train", device=DEVICE)
+
 # choose N_TRAIN samples randomly
-val_data, train_data = torch.utils.data.random_split(
-    training_data, [N_TRAIN, len(training_data) - N_TRAIN]
-)
+val_data, train_data = torch.utils.data.random_split(training_data, [0.2, 0.8])
 
 
 train_data_loader = DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True)
 val_data_loader = DataLoader(val_data, batch_size=BATCH_SIZE, shuffle=True)
 
 
-learning_rate = 0.0001
-epochs = 100
+learning_rate = 0.001
+epochs = 5
 step_size = 2
 gamma = 0.75
 
 
 model = LinOSSModel(
-    input_dim=2,
-    output_dim=1,
-    hidden_dim=32,
-    num_layers=3,
+    input_dim=6, output_dim=5, hidden_dim=128, num_layers=2, classification=True
 ).to(DEVICE)
 
 
@@ -64,11 +96,11 @@ for epoch in progress_bar:
     train_loss = 0.0
     for input, target in train_data_loader:
         optimizer.zero_grad()
-        prediction = model(input).squeeze(-1)
+        prediction = model(input, 1).squeeze(-1)
 
-        prediction = prediction[:, -1].squeeze(1)[..., 0]
+        # calculate cross entropy loss
+        loss = torch.nn.functional.cross_entropy(prediction, target)
 
-        loss = relative_l2_error(prediction, target, dim=None)
         loss.backward()
         optimizer.step()
 
@@ -81,9 +113,8 @@ for epoch in progress_bar:
     for input, target in val_data_loader:
         with torch.no_grad():
             prediction = model(input).squeeze(-1)
-            prediction = prediction[:, -1].squeeze(1)[..., 0]
 
-        loss = torch.sum(relative_l2_error(prediction, target))
+        loss = torch.nn.functional.cross_entropy(prediction, target)
         validation_relative_l2 += loss.item()
 
     validation_relative_l2 /= len(val_data)

@@ -73,11 +73,12 @@ class LinOSSBlock(nn.Module):
 
         b, n, m = u.shape
 
-        A = nn.ReLU()(self.A)
-        S = torch.inverse(torch.eye(m) + dt**2 * A)
+        A = nn.ReLU()(self.A).to(u.device)
+        S = torch.inverse(torch.eye(m, device=u.device) + dt**2 * A).to(u.device)
         assert S.shape == (m, m)
 
         M_inv: torch.Tensor = torch.block_diag(S, S)
+        M_inv = M_inv.to(u.device)
         M_inv[0 : self.hidden_dim, self.hidden_dim :] += -dt * S @ A
         M_inv[self.hidden_dim :, 0 : self.hidden_dim] += dt * S
         assert M_inv.shape == (2 * m, 2 * m)
@@ -87,7 +88,9 @@ class LinOSSBlock(nn.Module):
             u_n = u[:, i]
 
             # F = M_inv @ [dt*B @ u, 0]
-            F = torch.cat([dt * self.B(u_n), torch.zeros_like(u_n)], dim=-1)
+            F = torch.cat(
+                [dt * self.B(u_n), torch.zeros_like(u_n, device=u.device)], dim=-1
+            )
             if i == 0:
                 x[:, i] = F @ M_inv.T
             else:
@@ -193,8 +196,8 @@ class LinOSSModel(nn.Module):
         u = self.decoder(u)
 
         if self.classification:
-            u = torch.mean(u, axis=0)
-            u = nn.functional.softmax(u, axis=0)
+            u = torch.mean(u, dim=1)
+            u = nn.functional.softmax(u, dim=-1)
         else:
             u = self.final_activation(u)
 

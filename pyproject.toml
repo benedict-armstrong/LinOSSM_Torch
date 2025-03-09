@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "ipykernel>=6.29.5",
+    "jax>=0.5.2",
     "jaxtyping>=0.2.38",
     "matplotlib>=3.10.1",
     "numpy>=2.2.3",
