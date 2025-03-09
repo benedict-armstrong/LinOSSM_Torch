@@ -39,6 +39,9 @@ class LinOSSBlock(nn.Module):
         self.C = nn.Linear(hidden_dim, hidden_dim, bias=bias)
         self.D = nn.Linear(hidden_dim, hidden_dim, bias=bias)
 
+        self.norm = nn.BatchNorm1d(4)
+        self.dropout = nn.Dropout(p=0.1)
+
         # diagonal matrix A
         self.A = torch.diag(nn.Parameter(torch.abs(torch.randn(hidden_dim) * A_max)))
 
@@ -98,6 +101,7 @@ class LinOSSBlock(nn.Module):
     def forward(
         self,
         u: Float[torch.Tensor, "n m"],
+        dt: float,
     ) -> Float[torch.Tensor, "n m"]:
         """Forward pass of the LinOSSBlock
 
@@ -110,14 +114,17 @@ class LinOSSBlock(nn.Module):
 
         # TODO: Possibly apply Batchnorm and Dropout
 
+        # step 0: apply Batchnorm
+        # u = self.norm(u)
         # Step 1 solve ODE
-        x = self.solver(u, dt=self.dt)
+        x = self.solver(u, dt=dt)
+        x = self.dropout(x)
         # Step 2 calculate representation x
         x = self.C(x) + self.D(u)
         # Step 3 apply activation
         x = self.activation(x)
 
-        return self.glu(x) + u
+        return self.dropout(self.glu(x)) + u
 
 
 class LinOSSModel(nn.Module):
@@ -168,7 +175,9 @@ class LinOSSModel(nn.Module):
 
         self.final_activation = nn.Tanh()
 
-    def forward(self, x: Float[torch.Tensor, "b n p"]) -> Float[torch.Tensor, "b n p"]:
+    def forward(
+        self, x: Float[torch.Tensor, "b n p"], dt: float
+    ) -> Float[torch.Tensor, "b n p"]:
         """
 
         b: batch size
@@ -179,7 +188,7 @@ class LinOSSModel(nn.Module):
         u = self.encoder(x)
 
         for layer in self.linOSS_layers:
-            u = layer(u)
+            u = layer(u, dt)
 
         u = self.decoder(u)
 
