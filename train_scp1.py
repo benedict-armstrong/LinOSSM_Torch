@@ -14,23 +14,26 @@ torch.manual_seed(0)
 np.random.seed(0)
 
 
-BATCH_SIZE = 64
+BATCH_SIZE = 5
 DEVICE = "cuda" if torch.cuda.is_available() else "mps"
 
+print(f"Using device: {DEVICE}")
 
-class WormsDataset(Dataset):
+
+class Dataset(Dataset):
     def __init__(
         self,
+        name: str,
         mode: Literal["train", "test"],
         device: str = "cpu",
     ):
         self.device = device
         self.mode = mode
-        self.data = np.array(pickle.load(open("data/EigenWorms/data.pkl", "rb")))
-        self.labels = np.array(pickle.load(open("data/EigenWorms/labels.pkl", "rb")))
+        self.data = np.array(pickle.load(open(f"data/{name}/data.pkl", "rb")))
+        self.labels = np.array(pickle.load(open(f"data/{name}/labels.pkl", "rb")))
 
         self.train_idx, self.test_idx = pickle.load(
-            open("data/EigenWorms/original_idxs.pkl", "rb")
+            open(f"data/{name}/original_idxs.pkl", "rb")
         )
 
         self.train_idx = np.array(self.train_idx)
@@ -54,7 +57,7 @@ class WormsDataset(Dataset):
         return data, label
 
 
-training_data = WormsDataset("train", device=DEVICE)
+training_data = Dataset("SelfRegulationSCP1", "train", device=DEVICE)
 
 # choose N_TRAIN samples randomly
 val_data, train_data = torch.utils.data.random_split(training_data, [0.2, 0.8])
@@ -65,13 +68,13 @@ val_data_loader = DataLoader(val_data, batch_size=BATCH_SIZE, shuffle=True)
 
 
 learning_rate = 0.001
-epochs = 5
+epochs = 20
 step_size = 2
 gamma = 0.75
 
 
 model = LinOSSModel(
-    input_dim=6, output_dim=5, hidden_dim=128, num_layers=2, classification=True
+    input_dim=6, output_dim=2, hidden_dim=128, num_layers=6, classification=True
 ).to(DEVICE)
 
 
@@ -92,7 +95,7 @@ metrics = {
 }
 
 progress_bar = tqdm.tqdm(range(epochs))
-for epoch in progress_bar:
+for i, epoch in enumerate(progress_bar):
     train_loss = 0.0
     for input, target in train_data_loader:
         optimizer.zero_grad()
@@ -105,25 +108,31 @@ for epoch in progress_bar:
         optimizer.step()
 
         train_loss += loss.item()
+        progress_bar.set_postfix(
+            {
+                "train_loss_current": train_loss,
+            }
+        )
 
     train_loss /= len(train_data_loader)
 
-    # Compute validation loss
-    validation_relative_l2 = 0.0
-    for input, target in val_data_loader:
-        with torch.no_grad():
-            prediction = model(input).squeeze(-1)
+    if (i + 1) % step_size == 0:
+        # Compute validation loss
+        validation_relative_l2 = 0.0
+        for input, target in val_data_loader:
+            with torch.no_grad():
+                prediction = model(input).squeeze(-1)
 
-        loss = torch.nn.functional.cross_entropy(prediction, target)
-        validation_relative_l2 += loss.item()
+            loss = torch.nn.functional.cross_entropy(prediction, target)
+            validation_relative_l2 += loss.item()
 
-    validation_relative_l2 /= len(val_data)
+        validation_relative_l2 /= len(val_data)
 
-    metrics["training_loss"].append(train_loss)
-    metrics["lr"].append(scheduler.get_last_lr())
-    metrics["validation_loss"].append(validation_relative_l2)
+        metrics["training_loss"].append(train_loss)
+        metrics["lr"].append(scheduler.get_last_lr())
+        metrics["validation_loss"].append(validation_relative_l2)
 
-    scheduler.step(validation_relative_l2)
+    scheduler.step()
 
     progress_bar.set_postfix(
         {
